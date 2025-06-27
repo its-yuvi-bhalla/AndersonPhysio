@@ -43,7 +43,7 @@ export async function POST(req: Request) {
 
     // Send email via Resend
     const { error: emailError } = await resend.emails.send({
-      from: 'forms@andersonphysiotherapy.ca',
+      from: process.env.EMAIL_FROM,
       to: ['info@andersonphysiotherapy.ca'],
       subject: 'New Website Inquiry',
       html: `
