@@ -1,22 +1,73 @@
+import { createClient } from '@supabase/supabase-js'
+import { Resend } from 'resend'
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+)
+
+const resend = new Resend(process.env.RESEND_API_KEY!)
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    console.log('[INFO] Received POST request')
 
-    const res = await fetch(process.env.GS_WEBHOOK_URL!, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const body = await req.json()
+    console.log('[DEBUG] Parsed request body:', body)
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error("Google Sheets Error:", errorText);
-      return new Response(JSON.stringify({ error: "Google Sheets Error" }), { status: 500 });
+    const { name, email, phone, message, preferredContact } = body
+
+    if (!name || !email || !message) {
+      console.warn('[WARN] Missing required fields:', { name, email, message })
+      return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 })
     }
 
-    return new Response(JSON.stringify({ success: true }), { status: 200 });
+    // Insert into Supabase
+    const { error: insertError } = await supabase.from('inquiries').insert([
+      {
+        name,
+        email,
+        phone: phone || null,
+        message,
+        preferred_contact: preferredContact || null,
+      }
+    ])
+    
+
+    if (insertError) {
+      console.error('[ERROR] Supabase insert error:', insertError)
+      return new Response(JSON.stringify({ error: 'Database error', details: insertError.message }), { status: 500 })
+    }
+
+    console.log('[SUCCESS] Data inserted into Supabase')
+
+    // Send email via Resend
+    const { error: emailError } = await resend.emails.send({
+      from: 'forms@andersonphysiotherapy.ca',
+      to: ['info@andersonphysiotherapy.ca'],
+      subject: 'New Website Inquiry',
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 24px;">
+          <h2>New Inquiry Received</h2>
+          <p><strong>Name:</strong> ${name}</p>
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Phone:</strong> ${phone || 'N/A'}</p>
+          <p><strong>Preferred Contact:</strong> ${preferredContact || 'N/A'}</p>
+          <p><strong>Message:</strong><br/>${message}</p>
+        </div>
+      `,
+    })
+
+    if (emailError) {
+      console.error('[ERROR] Resend email error:', emailError)
+    } else {
+      console.log('[SUCCESS] Email sent via Resend')
+    }
+
+    return new Response(JSON.stringify({ success: true }), { status: 200 })
+
   } catch (err) {
-    console.error("Server Error:", err);
-    return new Response(JSON.stringify({ error: "Internal Server Error" }), { status: 500 });
+    console.error('[FATAL] Unhandled error:', err)
+    return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 })
   }
 }
