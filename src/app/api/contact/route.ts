@@ -1,28 +1,45 @@
 import { createClient } from '@supabase/supabase-js'
 import { Resend } from 'resend'
 
+// Initialize Supabase and Resend
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_ANON_KEY!
 )
-
 const resend = new Resend(process.env.RESEND_API_KEY!)
 
+// Allowed frontend domains (add prod later)
+const ALLOWED_ORIGINS = ['http://localhost:5173', 'https://www.andersonphysiotherapy.ca']
+
+// Common CORS headers
+const getCorsHeaders = (origin: string | null) => ({
+  'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin || '') ? origin! : '',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+})
+
+export async function OPTIONS(req: Request) {
+  const origin = req.headers.get('origin')
+  return new Response(null, {
+    status: 204,
+    headers: getCorsHeaders(origin),
+  })
+}
+
 export async function POST(req: Request) {
+  const origin = req.headers.get('origin')
+
   try {
-    console.log('[INFO] Received POST request')
-
     const body = await req.json()
-    console.log('[DEBUG] Parsed request body:', body)
-
     const { name, email, phone, message, preferredContact } = body
 
     if (!name || !email || !message) {
-      console.warn('[WARN] Missing required fields:', { name, email, message })
-      return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 })
+      return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+        status: 400,
+        headers: getCorsHeaders(origin),
+      })
     }
 
-    // Insert into Supabase
     const { error: insertError } = await supabase.from('inquiries').insert([
       {
         name,
@@ -30,20 +47,18 @@ export async function POST(req: Request) {
         phone: phone || null,
         message,
         preferred_contact: preferredContact || null,
-      }
+      },
     ])
-    
 
     if (insertError) {
-      console.error('[ERROR] Supabase insert error:', insertError)
-      return new Response(JSON.stringify({ error: 'Database error', details: insertError.message }), { status: 500 })
+      return new Response(JSON.stringify({ error: 'Database error', details: insertError.message }), {
+        status: 500,
+        headers: getCorsHeaders(origin),
+      })
     }
 
-    console.log('[SUCCESS] Data inserted into Supabase')
-
-    // Send email via Resend
     const { error: emailError } = await resend.emails.send({
-      from: process.env.EMAIL_FROM,
+      from: process.env.EMAIL_FROM!,
       to: ['info@andersonphysiotherapy.ca'],
       subject: 'New Website Inquiry',
       html: `
@@ -58,16 +73,16 @@ export async function POST(req: Request) {
       `,
     })
 
-    if (emailError) {
-      console.error('[ERROR] Resend email error:', emailError)
-    } else {
-      console.log('[SUCCESS] Email sent via Resend')
-    }
-
-    return new Response(JSON.stringify({ success: true }), { status: 200 })
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: getCorsHeaders(origin),
+    })
 
   } catch (err) {
-    console.error('[FATAL] Unhandled error:', err)
-    return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 })
+    console.error('[FATAL]', err)
+    return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
+      status: 500,
+      headers: getCorsHeaders(origin),
+    })
   }
 }
